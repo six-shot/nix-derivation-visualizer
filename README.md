@@ -37,23 +37,7 @@ The goal is to visualize the derivation graph of `foo` using **D3.js** to create
 ## 🤝 Contribution  
 This project is part of my Outreachy application: **"Explore interactive visualization opportunities for Nix derivation graphs."**  
 
-### About the Project  
-Nix is a build system that represents processes and filesystem operations as **pure functions**, using **derivations** as its core data structure. These derivations form **directed acyclic graphs (DAGs)**, which define dependencies between packages. However, as these graphs grow, they become increasingly **complex** and **cluttered** with intermediate dependencies.  
-
-This project aims to build an **interactive visualization tool** for Nix derivation graphs to improve **inspectability, observability, and debugging**. Key aspects of the project include:  
-- **Exploring graph layout algorithms** for clear representation.  
-- **Developing clustering heuristics** to reduce noise.  
-- **Implementing a multi-level detail view** for scalable navigation.  
-- **Handling Nix evaluation errors and build failures** in visualizations.  
-- **Optimizing real-time rendering** for graphs with 10³-10⁴ nodes.  
-
-### Technologies & Skills  
-- **OpenGL** (Required)  
-- **Network Analysis** (Preferred)  
-- **Nix & Nixpkgs** (Preferred)  
-- **Linux environment with Nix & GL-capable graphics**  
-
-
+For more details, see the [Hedgedoc](https://md.someonex.net/59BbFR9dSk6iYBs0Q0vN_Q#) and the [NixOS Outreachy page](https://www.outreachy.org/apply/project-selection/).  
 
 
 ## 📜 License  
