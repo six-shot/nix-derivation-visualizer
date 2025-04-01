@@ -1,3 +1,5 @@
 flask
 networkx
 pydot
+flask-cors
+gunicorn
