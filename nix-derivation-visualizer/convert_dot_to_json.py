@@ -1,30 +1,79 @@
 import networkx as nx
 import json
 import subprocess
-import sys
+from flask import Flask, request, jsonify
+from flask_cors import CORS
 
-# Ensure the user provides a derivation file path
-if len(sys.argv) < 2:
-    print("Usage: python convert_dot_to_json.py <derivation_file>....Provide a derivation file")
-    sys.exit(1)
+# def convert_nix_to_graph(nix_expression):
+#     dot_file = "graph.dot"
+    
+#     # Write the expression to a temporary file
+#     with open("temp.nix", "w") as f:
+#         f.write(nix_expression)
+    
+#     # Generate Graphviz DOT file from Nix expression
+#     cmd = f"nix-store --query --graph $(nix-instantiate temp.nix) > {dot_file}"
+#     try:
+#         subprocess.run(cmd, shell=True, check=True)
+#     except subprocess.CalledProcessError as e:
+#         return None, f"Error processing Nix expression: {str(e)}"
 
-derivation_file = sys.argv[1]  # Get the file path from the command line
-dot_file = "graph.dot"
+#     # Load the Graphviz .dot file
+#     try:
+#         graph = nx.nx_pydot.read_dot(dot_file)
+#     except Exception as e:
+#         return None, f"Error reading DOT file: {str(e)}"
 
-#Generate a Graphviz DOT file from a Nix derivation
-cmd = f"nix-store --query --graph $(nix-instantiate {derivation_file}) > {dot_file}"
-subprocess.run(cmd, shell=True, check=True)
+#     # Convert to D3.js format
+#     nodes = [{"id": node} for node in graph.nodes()]
+#     links = [{"source": u, "target": v} for u, v in graph.edges()]
+    
+#     return {"nodes": nodes, "links": links}, None
+def convert_nix_to_graph(nix_expression):
+    dot_file = "graph.dot"
+    
+    # Write the expression to a temporary file
+    with open("temp.nix", "w") as f:
+        f.write(nix_expression)
 
-# Load the Graphviz .dot file
-graph = nx.nx_pydot.read_dot(dot_file)
+    print("🔍 Debug: Writing this Nix expression to temp.nix:")
+    print(nix_expression)  # Print the exact Nix expression for debugging
 
-# Convert to a format suitable for D3.js (nodes & links)
-nodes = [{"id": node} for node in graph.nodes()]
-links = [{"source": u, "target": v} for u, v in graph.edges()]
+    # Generate Graphviz DOT file from Nix expression
+    cmd = f"nix-store --query --graph $(nix-instantiate temp.nix) > {dot_file}"
+    try:
+        subprocess.run(cmd, shell=True, check=True, stderr=subprocess.PIPE)
+    except subprocess.CalledProcessError as e:
+        print("❌ nix-instantiate Error:", e.stderr.decode())
+        return None, f"Error processing Nix expression: {e.stderr.decode()}"
 
-# Save to JSON
-output = {"nodes": nodes, "links": links}
-with open("graph.json", "w") as f:
-    json.dump(output, f, indent=4)
+    # Load the Graphviz .dot file
+    try:
+        graph = nx.nx_pydot.read_dot(dot_file)
+    except Exception as e:
+        return None, f"Error reading DOT file: {str(e)}"
 
-print(f"Converted {dot_file} to graph.json successfully!")
+    nodes = [{"id": node} for node in graph.nodes()]
+    links = [{"source": u, "target": v} for u, v in graph.edges()]
+    
+    return {"nodes": nodes, "links": links}, None
+
+# Create Flask app
+app = Flask(__name__)
+CORS(app)
+
+@app.route('/convert', methods=['POST'])
+def convert():
+    if not request.json or 'nix_expression' not in request.json:
+        return jsonify({'error': 'No Nix expression provided'}), 400
+    
+    nix_expression = request.json['nix_expression']
+    graph_data, error = convert_nix_to_graph(nix_expression)
+    
+    if error:
+        return jsonify({'error': error}), 400
+    
+    return jsonify(graph_data)
+
+if __name__ == '__main__':
+    app.run(debug=True)
