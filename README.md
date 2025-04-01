@@ -1,4 +1,4 @@
-# Explore interactive visualization opportunities for Nix derivation graphs
+# nix-derivation-visualizer  
 
 ## 🤝 Contribution  
 This project is part of my Outreachy application: **"Explore interactive visualization opportunities for Nix derivation graphs."**  
