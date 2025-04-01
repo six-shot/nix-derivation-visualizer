@@ -5,7 +5,8 @@ function FetchGraph() {
   const [graphData, setGraphData] = useState(null);
   const [error, setError] = useState(null);
   const [focusedNode, setFocusedNode] = useState(null);
-  const [depth, setDepth] = useState(1);
+  const [depth, setDepth] = useState(3);
+  const [searchTerm, setSearchTerm] = useState("");
   const svgRef = useRef();
 
   async function fetchGraphData(nixExpression) {
@@ -31,75 +32,26 @@ function FetchGraph() {
     }
   }
 
+  const findRootNodes = (nodes, links) => {
+    const hasIncoming = new Set(links.map((l) => l.target));
+    return nodes.filter((n) => !hasIncoming.has(n.id));
+  };
+
   useEffect(() => {
     if (!graphData) return;
 
     d3.select(svgRef.current).selectAll("*").remove();
 
-    // Get the actual dimensions of the container
     const container = svgRef.current.parentElement;
     const width = container.clientWidth;
     const height = container.clientHeight;
 
-    // Update the SVG dimensions
     const svg = d3
       .select(svgRef.current)
       .attr("width", width)
       .attr("height", height);
 
-    // Update the tree layout dimensions
-    const treeLayout = d3.tree().size([height - 100, width - 200]); // Note: swapped dimensions for horizontal layout
-
-    // Create hierarchical layout
-    const stratify = d3
-      .stratify()
-      .id((d) => d.id)
-      .parentId((d) => d.parent);
-
-    // Transform flat data into hierarchical view
-    const processDataForHierarchy = (
-      nodes,
-      links,
-      focusNode = null,
-      maxDepth = 1
-    ) => {
-      if (!focusNode) {
-        // Find root node (node with no incoming edges)
-        const hasIncoming = new Set(links.map((l) => l.target));
-        focusNode = nodes.find((n) => !hasIncoming.has(n.id))?.id;
-      }
-
-      const seen = new Set();
-      const result = [];
-      const traverse = (nodeId, depth = 0, parent = null) => {
-        if (depth > maxDepth || seen.has(nodeId)) return;
-        seen.add(nodeId);
-
-        result.push({
-          id: nodeId,
-          parent: parent,
-          depth: depth,
-        });
-
-        links
-          .filter((l) => l.source === nodeId)
-          .forEach((l) => traverse(l.target, depth + 1, nodeId));
-      };
-
-      traverse(focusNode);
-      return result;
-    };
-
-    const hierarchicalData = processDataForHierarchy(
-      graphData.nodes,
-      graphData.links,
-      focusedNode,
-      depth
-    );
-
-    const root = stratify(hierarchicalData);
-
-    const g = svg.append("g").attr("transform", `translate(50, 50)`);
+    const g = svg.append("g");
 
     // Add zoom behavior
     const zoom = d3
@@ -108,6 +60,62 @@ function FetchGraph() {
       .on("zoom", (event) => g.attr("transform", event.transform));
 
     svg.call(zoom);
+    svg.call(zoom.transform, d3.zoomIdentity.translate(width / 4, height / 2));
+
+    // Process data for tree layout
+    const processData = (
+      nodes,
+      links,
+      focusNode = null,
+      maxDepth = Infinity
+    ) => {
+      const rootNode = focusNode || findRootNodes(nodes, links)[0]?.id;
+      if (!rootNode) return [];
+
+      const seen = new Set();
+      const result = [];
+
+      const traverse = (nodeId, depth = 0, parent = null) => {
+        if (depth > maxDepth || seen.has(nodeId)) return;
+        seen.add(nodeId);
+
+        const node = nodes.find((n) => n.id === nodeId);
+        if (!node) return;
+
+        result.push({
+          id: nodeId,
+          parent: parent,
+          depth: depth,
+          name: node.id.split("-").pop(),
+          fullName: node.id,
+        });
+
+        // Get all dependencies
+        links
+          .filter((l) => l.source === nodeId)
+          .forEach((l) => traverse(l.target, depth + 1, nodeId));
+      };
+
+      traverse(rootNode);
+      return result;
+    };
+
+    const treeData = processData(
+      graphData.nodes,
+      graphData.links,
+      focusedNode,
+      depth
+    );
+
+    const stratify = d3
+      .stratify()
+      .id((d) => d.id)
+      .parentId((d) => d.parent);
+
+    const root = stratify(treeData);
+
+    // Create tree layout
+    const treeLayout = d3.tree().size([height - 100, width - 300]);
 
     const nodes = treeLayout(root);
 
@@ -118,12 +126,13 @@ function FetchGraph() {
       .attr("class", "link")
       .attr("fill", "none")
       .attr("stroke", "#999")
-      .attr("stroke-width", 1)
+      .attr("stroke-opacity", 0.6)
+      .attr("stroke-width", 1.5)
       .attr(
         "d",
         d3
           .linkHorizontal()
-          .x((d) => d.y) // Swap x and y for horizontal layout
+          .x((d) => d.y)
           .y((d) => d.x)
       );
 
@@ -133,17 +142,20 @@ function FetchGraph() {
       .data(nodes.descendants())
       .join("g")
       .attr("class", "node")
-      .attr("transform", (d) => `translate(${d.y},${d.x})`); // Swap x and y
+      .attr("transform", (d) => `translate(${d.y},${d.x})`);
 
     // Add node circles
     node
       .append("circle")
-      .attr("r", 5)
+      .attr("r", 6)
       .attr("fill", (d) => {
-        if (d.data.id.endsWith(".drv")) return "#4CAF50";
-        if (d.data.id.endsWith(".patch")) return "#FFA726";
+        if (d.data.fullName.endsWith(".drv")) return "#4CAF50";
+        if (d.data.fullName.endsWith(".patch")) return "#FFA726";
+        if (d.data.fullName.endsWith(".sh")) return "#9C27B0";
         return "#2196F3";
-      });
+      })
+      .attr("stroke", "#fff")
+      .attr("stroke-width", 2);
 
     // Add node labels
     node
@@ -151,18 +163,39 @@ function FetchGraph() {
       .attr("dy", "0.31em")
       .attr("x", (d) => (d.children ? -8 : 8))
       .attr("text-anchor", (d) => (d.children ? "end" : "start"))
-      .text((d) => {
-        const name = d.data.id.split("-").pop();
-        return name.length > 20 ? name.substring(0, 20) + "..." : name;
-      })
+      .text((d) => d.data.name)
+      .style("font-size", "12px")
+      .style("font-family", "monospace")
       .on("mouseover", (event, d) => {
-        // Show full name on hover
-        d3.select(event.currentTarget.parentNode)
-          .append("title")
-          .text(d.data.id);
+        // Show tooltip with full name
+        const tooltip = svg
+          .append("g")
+          .attr("class", "tooltip")
+          .attr("transform", `translate(${d.y},${d.x - 20})`);
+
+        tooltip
+          .append("rect")
+          .attr("x", -3)
+          .attr("y", -25)
+          .attr("width", d.data.fullName.length * 7)
+          .attr("height", 20)
+          .attr("fill", "black")
+          .attr("opacity", 0.8)
+          .attr("rx", 3);
+
+        tooltip
+          .append("text")
+          .attr("x", 0)
+          .attr("y", -10)
+          .text(d.data.fullName)
+          .attr("fill", "white")
+          .style("font-size", "10px");
+      })
+      .on("mouseout", () => {
+        svg.selectAll(".tooltip").remove();
       });
 
-    // Add click handlers
+    // Add click handler
     node.on("click", (event, d) => {
       setFocusedNode(d.data.id);
     });
@@ -192,116 +225,97 @@ function FetchGraph() {
         left: 0,
         right: 0,
         bottom: 0,
-        padding: "20px",
         display: "flex",
         flexDirection: "column",
+        backgroundColor: "#f5f5f5",
       }}
     >
       <div
         style={{
-          marginBottom: "20px",
+          padding: "10px",
           display: "flex",
           gap: "10px",
           alignItems: "center",
+          backgroundColor: "white",
+          borderBottom: "1px solid #ccc",
         }}
       >
-        <button
-          onClick={loadGraph}
-          style={{
-            padding: "8px 16px",
-            backgroundColor: "#4CAF50",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-          }}
-        >
-          Load Graph
-        </button>
+        <button onClick={loadGraph}>Load Graph</button>
         <div>
           <label>Depth: </label>
           <input
             type="range"
             min="1"
-            max="5"
+            max="10"
             value={depth}
             onChange={(e) => setDepth(Number(e.target.value))}
           />
           <span>{depth}</span>
         </div>
-        <button
-          onClick={() => setFocusedNode(null)}
-          style={{
-            padding: "8px 16px",
-            backgroundColor: "#2196F3",
-            color: "white",
-            border: "none",
-            borderRadius: "4px",
-            cursor: "pointer",
-          }}
-        >
-          Reset Focus
-        </button>
-      </div>
-      {error && (
-        <div style={{ color: "red", marginBottom: "10px" }}>Error: {error}</div>
-      )}
-      <div
-        style={{
-          flex: 1,
-          border: "1px solid #ccc",
-          borderRadius: "4px",
-          overflow: "hidden",
-          backgroundColor: "#fff",
-          position: "relative",
-        }}
-      >
-        <svg
-          ref={svgRef}
-          style={{
-            position: "absolute",
-            top: 0,
-            left: 0,
-            width: "100%",
-            height: "100%",
-          }}
+        <button onClick={() => setFocusedNode(null)}>Reset Focus</button>
+        <input
+          type="text"
+          placeholder="Search nodes..."
+          value={searchTerm}
+          onChange={(e) => setSearchTerm(e.target.value)}
         />
       </div>
-      <div style={{ marginTop: "10px" }}>
-        <div style={{ display: "flex", gap: "20px" }}>
-          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-            <span
-              style={{
-                width: "12px",
-                height: "12px",
-                backgroundColor: "#4CAF50",
-                borderRadius: "50%",
-              }}
-            ></span>
-            <span>Derivation</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-            <span
-              style={{
-                width: "12px",
-                height: "12px",
-                backgroundColor: "#FFA726",
-                borderRadius: "50%",
-              }}
-            ></span>
-            <span>Patch</span>
-          </div>
-          <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-            <span
-              style={{
-                width: "12px",
-                height: "12px",
-                backgroundColor: "#2196F3",
-                borderRadius: "50%",
-              }}
-            ></span>
-            <span>Other</span>
-          </div>
+      <div style={{ flex: 1, overflow: "hidden" }}>
+        <svg ref={svgRef} style={{ width: "100%", height: "100%" }} />
+      </div>
+      <div
+        style={{
+          padding: "10px",
+          backgroundColor: "white",
+          borderTop: "1px solid #ccc",
+          display: "flex",
+          gap: "20px",
+          justifyContent: "center",
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+          <span
+            style={{
+              width: "12px",
+              height: "12px",
+              backgroundColor: "#4CAF50",
+              borderRadius: "50%",
+            }}
+          ></span>
+          <span>Derivation (.drv)</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+          <span
+            style={{
+              width: "12px",
+              height: "12px",
+              backgroundColor: "#FFA726",
+              borderRadius: "50%",
+            }}
+          ></span>
+          <span>Patch (.patch)</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+          <span
+            style={{
+              width: "12px",
+              height: "12px",
+              backgroundColor: "#9C27B0",
+              borderRadius: "50%",
+            }}
+          ></span>
+          <span>Shell Script (.sh)</span>
+        </div>
+        <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
+          <span
+            style={{
+              width: "12px",
+              height: "12px",
+              backgroundColor: "#2196F3",
+              borderRadius: "50%",
+            }}
+          ></span>
+          <span>Other</span>
         </div>
       </div>
     </div>
