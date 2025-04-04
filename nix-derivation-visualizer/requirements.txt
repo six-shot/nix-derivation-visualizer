@@ -1,0 +1,4 @@
+flask
+networkx
+pydot
+flask-cors
