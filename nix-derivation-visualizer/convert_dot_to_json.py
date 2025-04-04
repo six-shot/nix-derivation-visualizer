@@ -60,7 +60,7 @@ def convert_nix_to_graph(nix_expression):
 
 # Create Flask app
 app = Flask(__name__)
-CORS(app)
+CORS(app, supports_credentials=True)
 
 @app.route('/convert', methods=['POST'])
 def convert():

@@ -1,0 +1,11 @@
+[project]
+name="backend"
+version="0.0.0"
+dependencies = [
+"flask",
+"networkx",
+"pydot",
+"flask-cors"
+]
+[project.scripts]
+drv-visualizer-backend = "convert_dot_to_json:app.run"
