@@ -1,7 +1,8 @@
 let
   pkgs = import <nixpkgs> { };
 in
-  pkgs.runCommand "foo" {
+pkgs.runCommand "foo"
+  {
     nativeBuildInputs = [ pkgs.gcc ];
     mainSource = ''
       #include <iostream>
@@ -9,7 +10,8 @@ in
           std::cout << "Hola Mundo";
       }
     '';
-  } ''
+  }
+  ''
     echo "$mainSource" > main.cc
     cc ./main.cc -l "stdc++" -o "$out"
-  '' 
+  ''
