@@ -14,12 +14,11 @@ function FetchGraph() {
       const controller = new AbortController();
       const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
 
-      // Use the correct backend URL based on environment
-      const backendUrl ="http://localhost:5000";
+    
 
-      console.log("Fetching from:", backendUrl); // Debug log
 
-      const response = await fetch(`${backendUrl}/convert`, {
+
+      const response = await fetch("/convert", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
