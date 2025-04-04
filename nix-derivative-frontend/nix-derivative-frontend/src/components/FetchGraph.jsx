@@ -11,16 +11,32 @@ function FetchGraph() {
 
   async function fetchGraphData(nixExpression) {
     try {
-      const response = await fetch("http://localhost:5000/convert", {
+      const controller = new AbortController();
+      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+
+      // Use the correct backend URL based on environment
+      const backendUrl ="http://localhost:5000";
+
+      console.log("Fetching from:", backendUrl); // Debug log
+
+      const response = await fetch(`${backendUrl}/convert`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
+          Accept: "application/json",
         },
+        mode: "cors",
         body: JSON.stringify({ nix_expression: nixExpression }),
+        signal: controller.signal,
       });
 
+      clearTimeout(timeoutId);
+
       if (!response.ok) {
-        const errorData = await response.json();
+        const errorData = await response
+          .json()
+          .catch(() => ({ error: `HTTP error! status: ${response.status}` }));
+        console.error("Server error:", errorData); // Debug log
         throw new Error(errorData.error || "Network response was not ok");
       }
 
@@ -28,6 +44,9 @@ function FetchGraph() {
       return data;
     } catch (error) {
       console.error("Error fetching graph data:", error);
+      if (error.name === "AbortError") {
+        throw new Error("Request timed out after 30 seconds");
+      }
       throw error;
     }
   }
