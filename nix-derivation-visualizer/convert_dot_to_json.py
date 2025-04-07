@@ -4,31 +4,7 @@ import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
-# def convert_nix_to_graph(nix_expression):
-#     dot_file = "graph.dot"
-    
-#     # Write the expression to a temporary file
-#     with open("temp.nix", "w") as f:
-#         f.write(nix_expression)
-    
-#     # Generate Graphviz DOT file from Nix expression
-#     cmd = f"nix-store --query --graph $(nix-instantiate temp.nix) > {dot_file}"
-#     try:
-#         subprocess.run(cmd, shell=True, check=True)
-#     except subprocess.CalledProcessError as e:
-#         return None, f"Error processing Nix expression: {str(e)}"
 
-#     # Load the Graphviz .dot file
-#     try:
-#         graph = nx.nx_pydot.read_dot(dot_file)
-#     except Exception as e:
-#         return None, f"Error reading DOT file: {str(e)}"
-
-#     # Convert to D3.js format
-#     nodes = [{"id": node} for node in graph.nodes()]
-#     links = [{"source": u, "target": v} for u, v in graph.edges()]
-    
-#     return {"nodes": nodes, "links": links}, None
 def convert_nix_to_graph(nix_expression):
     dot_file = "graph.dot"
     
