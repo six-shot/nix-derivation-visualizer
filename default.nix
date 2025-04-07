@@ -65,14 +65,21 @@ rec {
         systemd.services = {
         "visualizer-backend" = {
             serviceConfig = {
-                # Equivalent: "${backend}/bin/${backend.meta.mainProgram}"
                 ExecStart = pkgs.lib.getExe backend;
+                User = "root";
+                Environment = [
+                  "NIX_PATH=nixpkgs=${pkgs.path}"
+                  "HOME=/root"
+                ];
             };
-               path = [
-            # "${nix}/bin" added to the service's `PATH` environment variable
-            pkgs.nix
-        ];
+            path = [
+                pkgs.nix
+                pkgs.coreutils
+            ];
             wantedBy = [ "multi-user.target" ];
+            serviceConfig.WorkingDirectory = "/root";
+            serviceConfig.Restart = "always";
+            serviceConfig.RestartSec = "3";
         };
     };
         networking.firewall.allowedTCPPorts = [ 80 ];
