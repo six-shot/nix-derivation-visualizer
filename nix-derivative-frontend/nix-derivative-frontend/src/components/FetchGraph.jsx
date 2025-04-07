@@ -12,11 +12,9 @@ function FetchGraph() {
   async function fetchGraphData(nixExpression) {
     try {
       const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000); // 30 second timeout
+      const timeoutId = setTimeout(() => controller.abort(), 30000);
 
-    
-
-
+      console.log("Sending request to /convert..."); // Add debug logging
 
       const response = await fetch("/convert", {
         method: "POST",
@@ -31,15 +29,24 @@ function FetchGraph() {
 
       clearTimeout(timeoutId);
 
+      console.log("Response received:", response.status); // Add debug logging
+
       if (!response.ok) {
         const errorData = await response
           .json()
           .catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-        console.error("Server error:", errorData); // Debug log
+        console.error("Server error:", errorData);
         throw new Error(errorData.error || "Network response was not ok");
       }
 
       const data = await response.json();
+      console.log("Received data:", data); // Add debug logging
+
+      // Validate data structure
+      if (!data || !data.nodes || !data.links || data.nodes.length === 0) {
+        throw new Error("Invalid or empty graph data received");
+      }
+
       return data;
     } catch (error) {
       console.error("Error fetching graph data:", error);
@@ -67,6 +74,14 @@ function FetchGraph() {
 
   useEffect(() => {
     if (!graphData) return;
+
+    console.log("Rendering graph with data:", graphData); // Add debug logging
+
+    // Validate data before processing
+    if (!graphData.nodes || !graphData.links || graphData.nodes.length === 0) {
+      setError("Invalid graph data structure");
+      return;
+    }
 
     d3.select(svgRef.current).selectAll("*").remove();
 
