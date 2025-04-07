@@ -1,8 +1,1 @@
 nixos.qcow2
-
-# Ignore virtual environment in the nix-derivation-visualizer directory
-nix-derivation-visualizer/venv/
-
-# Ignore Python bytecode files and directories
-nix-derivation-visualizer/__pycache__/
-nix-derivation-visualizer/**/*.pyc
