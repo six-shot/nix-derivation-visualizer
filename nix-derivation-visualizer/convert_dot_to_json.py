@@ -4,6 +4,7 @@ import subprocess
 from flask import Flask, request, jsonify
 from flask_cors import CORS
 
+
 # def convert_nix_to_graph(nix_expression):
 #     dot_file = "graph.dot"
     
@@ -62,6 +63,7 @@ def convert_nix_to_graph(nix_expression):
 app = Flask(__name__)
 CORS(app)
 
+
 @app.route('/convert', methods=['POST'])
 def convert():
     if not request.json or 'nix_expression' not in request.json:
@@ -76,4 +78,6 @@ def convert():
     return jsonify(graph_data)
 
 if __name__ == '__main__':
+
     app.run(debug=True)
+
