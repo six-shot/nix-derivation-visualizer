@@ -7,6 +7,10 @@ function FetchGraph() {
   const [focusedNode, setFocusedNode] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [isLoading, setIsLoading] = useState(false);
+  const [nixExpression, setNixExpression] = useState(`let
+  pkgs = import <nixpkgs> {};
+in
+  pkgs.hello`);
   const svgRef = useRef();
 
   async function fetchGraphData(nixExpression) {
@@ -243,12 +247,6 @@ function FetchGraph() {
   const loadGraph = async () => {
     setIsLoading(true);
     try {
-      const nixExpression = `
-        let
-          pkgs = import <nixpkgs> {};
-        in
-          pkgs.hello
-      `;
       const data = await fetchGraphData(nixExpression);
       setGraphData(data);
     } catch (err) {
@@ -320,6 +318,20 @@ function FetchGraph() {
           borderBottom: "1px solid #ccc",
         }}
       >
+        <textarea
+          value={nixExpression}
+          onChange={(e) => setNixExpression(e.target.value)}
+          style={{
+            padding: "8px",
+            borderRadius: "4px",
+            border: "1px solid #ccc",
+            width: "300px",
+            height: "80px",
+            fontFamily: "monospace",
+            resize: "vertical",
+          }}
+          placeholder="Enter Nix expression..."
+        />
         <button
           onClick={loadGraph}
           disabled={isLoading}
@@ -333,20 +345,8 @@ function FetchGraph() {
             opacity: isLoading ? 0.7 : 1,
           }}
         >
-          {isLoading ? "Loading..." : "Load Graph"}
+          {isLoading ? "Loading..." : "Generate Graph"}
         </button>
-        {/* <input
-          type="text"
-          placeholder="Search nodes..."
-          value={searchTerm}
-          onChange={(e) => setSearchTerm(e.target.value)}
-          style={{
-            padding: "8px",
-            borderRadius: "4px",
-            border: "1px solid #ccc",
-            width: "200px",
-          }}
-        /> */}
         <button
           onClick={() => {
             setFocusedNode(null);
