@@ -61,7 +61,7 @@ in
           ? { graph_type: "derivation", nix_expression: nixExpression }
           : { graph_type: "reference", store_path: storePath };
 
-      const res = await fetch("http://localhost:5000/convert", {
+      const res = await fetch("/convert", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(payload),
