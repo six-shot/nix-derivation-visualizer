@@ -1,6 +1,4 @@
-
-        let
-          pkgs = import <nixpkgs> {};
-        in
-          pkgs.hello
-      
+let
+  pkgs = import <nixpkgs> {};
+in
+  pkgs.hello

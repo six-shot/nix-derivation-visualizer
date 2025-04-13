@@ -1,1 +1,4 @@
 nixos.qcow2
+
+result/
+nix-derivation-visualizer/result/

@@ -2,97 +2,114 @@ import { useState, useEffect, useRef } from "react";
 import * as d3 from "d3";
 
 function FetchGraph() {
-  const [graphData, setGraphData] = useState(null);
-  const [error, setError] = useState(null);
-  const [focusedNode, setFocusedNode] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("");
-  const [isLoading, setIsLoading] = useState(false);
+  const [fullData, setFullData] = useState(null);
+  const [visibleData, setVisibleData] = useState({ nodes: [], links: [] });
   const [nixExpression, setNixExpression] = useState(`let
   pkgs = import <nixpkgs> {};
 in
   pkgs.hello`);
+  const [isLoading, setIsLoading] = useState(false);
   const svgRef = useRef();
+  const [graphType, setGraphType] = useState("derivation");
+  const [storePath, setStorePath] = useState("");
 
-  async function fetchGraphData(nixExpression) {
+  // Add the CSS styles
+  useEffect(() => {
+    const styleSheet = document.createElement("style");
+    styleSheet.textContent = `
+      .loader-dots {
+        display: flex;
+        gap: 8px;
+        align-items: center;
+      }
+
+      .loader-dots div {
+        width: 10px;
+        height: 10px;
+        border-radius: 50%;
+        background: #4CAF50;
+        animation: bounce 0.5s alternate infinite;
+      }
+
+      .loader-dots div:nth-child(2) {
+        animation-delay: 0.15s;
+      }
+
+      .loader-dots div:nth-child(3) {
+        animation-delay: 0.3s;
+      }
+
+      @keyframes bounce {
+        from {
+          transform: translateY(0);
+        }
+        to {
+          transform: translateY(-10px);
+        }
+      }
+    `;
+    document.head.appendChild(styleSheet);
+    return () => document.head.removeChild(styleSheet);
+  }, []);
+
+  // Fetch the full graph once
+  const fetchGraph = async () => {
+    setIsLoading(true);
     try {
-      const controller = new AbortController();
-      const timeoutId = setTimeout(() => controller.abort(), 30000);
+      const payload =
+        graphType === "derivation"
+          ? { graph_type: "derivation", nix_expression: nixExpression }
+          : { graph_type: "reference", store_path: storePath };
 
-      console.log("Sending request to /convert..."); // Add debug logging
-
-      const response = await fetch("/convert", {
+      const res = await fetch("http://localhost:5000/convert", {
         method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Accept: "application/json",
-        },
-        mode: "cors",
-        body: JSON.stringify({ nix_expression: nixExpression }),
-        signal: controller.signal,
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(payload),
       });
-
-      clearTimeout(timeoutId);
-
-      console.log("Response received:", response.status); // Add debug logging
-
-      if (!response.ok) {
-        const errorData = await response
-          .json()
-          .catch(() => ({ error: `HTTP error! status: ${response.status}` }));
-        console.error("Server error:", errorData);
-        throw new Error(errorData.error || "Network response was not ok");
-      }
-
-      const data = await response.json();
-      console.log("Received data:", data); // Add debug logging
-
-      // Validate data structure
-      if (!data || !data.nodes || !data.links || data.nodes.length === 0) {
-        throw new Error("Invalid or empty graph data received");
-      }
-
-      return data;
-    } catch (error) {
-      console.error("Error fetching graph data:", error);
-      if (error.name === "AbortError") {
-        throw new Error("Request timed out after 30 seconds");
-      }
-      throw error;
+      const data = await res.json();
+      setFullData(data);
+      setVisibleData(data);
+    } catch (err) {
+      console.error("Error loading graph", err);
+    } finally {
+      setIsLoading(false);
     }
-  }
+  };
 
+  // Find root nodes (no incoming links)
   const findRootNodes = (nodes, links) => {
     const hasIncoming = new Set(links.map((l) => l.target));
     return nodes.filter((n) => !hasIncoming.has(n.id));
   };
 
-  // Add this helper function to properly extract package names
-  const getReadableName = (storePath) => {
-    // Match the pattern after the hash: everything after "hash-" up to the end
-    const match = storePath.match(/[a-z0-9]{32}-(.+)$/);
-    if (match) {
-      return match[1]; // Returns "bash-5.2p37.drv" from the example
-    }
-    return storePath; // Fallback to full path if pattern doesn't match
+  // Get readable label from store path
+  const getName = (id) => id.match(/[a-z0-9]{32}-(.+)$/)?.[1] ?? id;
+
+  // Expand node: show node + direct neighbors
+  const expandNode = (nodeId, data = fullData) => {
+    const relatedNodes = new Set([nodeId]);
+    data.links.forEach((l) => {
+      if (l.source.id === nodeId || l.source === nodeId)
+        relatedNodes.add(l.target.id || l.target);
+      if (l.target.id === nodeId || l.target === nodeId)
+        relatedNodes.add(l.source.id || l.source);
+    });
+    const nodes = data.nodes.filter((n) => relatedNodes.has(n.id));
+    const links = data.links.filter(
+      (l) =>
+        relatedNodes.has(l.source.id || l.source) &&
+        relatedNodes.has(l.target.id || l.target)
+    );
+    setVisibleData({ nodes, links });
   };
 
   useEffect(() => {
-    if (!graphData) return;
+    if (!visibleData.nodes.length) return;
 
-    console.log("Rendering graph with data:", graphData); // Add debug logging
-
-    // Validate data before processing
-    if (!graphData.nodes || !graphData.links || graphData.nodes.length === 0) {
-      setError("Invalid graph data structure");
-      return;
-    }
+    const width = svgRef.current.clientWidth;
+    const height = svgRef.current.clientHeight;
 
     d3.select(svgRef.current).selectAll("*").remove();
-
-    const container = svgRef.current.parentElement;
-    const width = container.clientWidth;
-    const height = container.clientHeight;
-
     const svg = d3
       .select(svgRef.current)
       .attr("width", width)
@@ -100,260 +117,208 @@ in
 
     const g = svg.append("g");
 
-    // Add zoom behavior
-    const zoom = d3
-      .zoom()
-      .scaleExtent([0.1, 3])
-      .on("zoom", (event) => g.attr("transform", event.transform));
+    svg.call(
+      d3
+        .zoom()
+        .scaleExtent([0.1, 3])
+        .on("zoom", (e) => g.attr("transform", e.transform))
+    );
 
-    svg.call(zoom);
-    svg.call(zoom.transform, d3.zoomIdentity.translate(width / 4, height / 2));
+    svg.call(
+      d3.zoom().transform,
+      d3.zoomIdentity.translate(width / 2, height / 2)
+    );
 
-    // Process data for tree layout
-    const processData = (nodes, links, focusNode = null) => {
-      const rootNode = focusNode || findRootNodes(nodes, links)[0]?.id;
-      if (!rootNode) return [];
+    // Forces
+    const simulation = d3
+      .forceSimulation(visibleData.nodes)
+      .force(
+        "link",
+        d3
+          .forceLink(visibleData.links)
+          .id((d) => d.id)
+          .distance(150)
+      )
+      .force("charge", d3.forceManyBody().strength(-500))
+      .force("center", d3.forceCenter(width / 2, height / 2))
+      .force("collision", d3.forceCollide().radius(40));
 
-      const seen = new Set();
-      const result = [];
+    svg
+      .append("defs")
+      .append("marker")
+      .attr("id", "arrowhead")
+      .attr("viewBox", "-0 -5 10 10")
+      .attr("refX", 20)
+      .attr("refY", 0)
+      .attr("orient", "auto")
+      .attr("markerWidth", 8)
+      .attr("markerHeight", 8)
+      .attr("xoverflow", "visible")
+      .append("svg:path")
+      .attr("d", "M 0,-5 L 10 ,0 L 0,5")
+      .attr("fill", "#999")
+      .style("stroke", "none");
 
-      const traverse = (nodeId, parent = null) => {
-        if (seen.has(nodeId)) return;
-        seen.add(nodeId);
-
-        const node = nodes.find((n) => n.id === nodeId);
-        if (!node) return;
-
-        result.push({
-          id: nodeId,
-          parent: parent,
-          fullName: node.id,
-          name: node.id.split("-").pop(),
-        });
-
-        // Get all dependencies
-        links
-          .filter((l) => l.source === nodeId)
-          .forEach((l) => traverse(l.target, nodeId));
-      };
-
-      traverse(rootNode);
-      return result;
-    };
-
-    const treeData = processData(graphData.nodes, graphData.links, focusedNode);
-
-    const stratify = d3
-      .stratify()
-      .id((d) => d.id)
-      .parentId((d) => d.parent);
-
-    const root = stratify(treeData);
-
-    // Create tree layout
-    const treeLayout = d3.tree().size([height - 100, width - 300]);
-
-    const nodes = treeLayout(root);
-
-    // Draw links
-    g.selectAll("path.link")
-      .data(nodes.links())
+    const links = g
+      .selectAll("path")
+      .data(visibleData.links)
       .join("path")
-      .attr("class", "link")
-      .attr("fill", "none")
       .attr("stroke", "#999")
       .attr("stroke-opacity", 0.6)
       .attr("stroke-width", 1.5)
-      .attr(
-        "d",
-        d3
-          .linkHorizontal()
-          .x((d) => d.y)
-          .y((d) => d.x)
-      );
+      .attr("fill", "none")
+      .attr("marker-end", "url(#arrowhead)");
 
-    // Create node groups
-    const node = g
+    const nodes = g
       .selectAll("g.node")
-      .data(nodes.descendants())
+      .data(visibleData.nodes)
       .join("g")
       .attr("class", "node")
-      .attr("transform", (d) => `translate(${d.y},${d.x})`);
+      .call(
+        d3
+          .drag()
+          .on("start", (event, d) => {
+            if (!event.active) simulation.alphaTarget(0.3).restart();
+            d.fx = d.x;
+            d.fy = d.y;
+          })
+          .on("drag", (event, d) => {
+            d.fx = event.x;
+            d.fy = event.y;
+          })
+          .on("end", (event, d) => {
+            if (!event.active) simulation.alphaTarget(0);
+            d.fx = null;
+            d.fy = null;
+          })
+      );
 
-    // Add node circles
-    node
+    nodes
       .append("circle")
       .attr("r", 6)
       .attr("fill", (d) => {
-        if (d.data.fullName.endsWith(".drv")) return "#4CAF50";
-        if (d.data.fullName.endsWith(".patch")) return "#FFA726";
-        if (d.data.fullName.endsWith(".sh")) return "#9C27B0";
+        if (d.id.endsWith(".drv")) return "#4CAF50";
+        if (d.id.endsWith(".patch")) return "#FFA726";
+        if (d.id.endsWith(".sh")) return "#9C27B0";
         return "#2196F3";
       })
       .attr("stroke", "#fff")
-      .attr("stroke-width", 2);
-
-    // Add node labels
-    node
-      .append("text")
-      .attr("dy", "0.31em")
-      .attr("x", (d) => (d.children ? -8 : 8))
-      .attr("text-anchor", (d) => (d.children ? "end" : "start"))
-      .text((d) => getReadableName(d.data.id)) // Use the new helper function
-      .style("font-size", "12px")
-      .style("font-family", "monospace")
-      .append("title") // Add tooltip with full path
-      .text((d) => d.data.id)
-      .on("mouseover", (event, d) => {
-        // Show tooltip with full name
-        const tooltip = svg
-          .append("g")
-          .attr("class", "tooltip")
-          .attr("transform", `translate(${d.y},${d.x - 20})`);
-
-        tooltip
-          .append("rect")
-          .attr("x", -3)
-          .attr("y", -25)
-          .attr("width", d.data.fullName.length * 7)
-          .attr("height", 20)
-          .attr("fill", "black")
-          .attr("opacity", 0.8)
-          .attr("rx", 3);
-
-        tooltip
-          .append("text")
-          .attr("x", 0)
-          .attr("y", -10)
-          .text(d.data.fullName)
-          .attr("fill", "white")
-          .style("font-size", "10px");
-      })
-      .on("mouseout", () => {
-        svg.selectAll(".tooltip").remove();
+      .attr("stroke-width", 2)
+      .on("click", (event, d) => {
+        expandNode(d.id);
       });
 
-    // Add click handler
-    node.on("click", (event, d) => {
-      setFocusedNode(d.data.id);
+    nodes
+      .append("text")
+      .attr("dx", 12)
+      .attr("dy", ".35em")
+      .text((d) => getName(d.id))
+      .style("font-size", "12px")
+      .style("font-family", "monospace")
+      .style("pointer-events", "none");
+
+    simulation.on("tick", () => {
+      links.attr("d", (d) => {
+        const dx = d.target.x - d.source.x;
+        const dy = d.target.y - d.source.y;
+        const dr = Math.sqrt(dx * dx + dy * dy);
+        return `M${d.source.x},${d.source.y}A${dr},${dr} 0 0,1 ${d.target.x},${d.target.y}`;
+      });
+      nodes.attr("transform", (d) => `translate(${d.x},${d.y})`);
     });
-  }, [graphData, focusedNode]);
-
-  // Load on mount
-  useEffect(() => {
-    loadGraph();
-  }, []); // Empty dependency array for mount-only
-
-  const loadGraph = async () => {
-    setIsLoading(true);
-    try {
-      const data = await fetchGraphData(nixExpression);
-      setGraphData(data);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setIsLoading(false);
-    }
-  };
-
-  // First, add this CSS to your styles
-  const styles = `
-    .loader-dots {
-      display: flex;
-      gap: 8px;
-      align-items: center;
-    }
-
-    .loader-dots div {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: #4CAF50;
-      animation: bounce 0.5s alternate infinite;
-    }
-
-    .loader-dots div:nth-child(2) {
-      animation-delay: 0.15s;
-    }
-
-    .loader-dots div:nth-child(3) {
-      animation-delay: 0.3s;
-    }
-
-    @keyframes bounce {
-      from {
-        transform: translateY(0);
-      }
-      to {
-        transform: translateY(-10px);
-      }
-    }
-  `;
-
-  // Add styles to document
-  const styleSheet = document.createElement("style");
-  styleSheet.innerText = styles;
-  document.head.appendChild(styleSheet);
+  }, [visibleData]);
 
   return (
     <div
       style={{
-        position: "absolute",
-        top: 0,
-        left: 0,
-        right: 0,
-        bottom: 0,
+        height: "100vh",
+        width: "100vw",
         display: "flex",
         flexDirection: "column",
-        backgroundColor: "#f5f5f5",
+        overflow: "hidden",
       }}
     >
       <div
         style={{
           padding: "10px",
           display: "flex",
-          gap: "10px",
           alignItems: "center",
-          backgroundColor: "white",
+          gap: "10px",
+          background: "#fff",
           borderBottom: "1px solid #ccc",
+          position: "sticky",
+          top: 0,
+          zIndex: 10,
+          minHeight: "100px",
+          boxSizing: "border-box",
         }}
       >
-        <textarea
-          value={nixExpression}
-          onChange={(e) => setNixExpression(e.target.value)}
+        <select
+          value={graphType}
+          onChange={(e) => setGraphType(e.target.value)}
           style={{
             padding: "8px",
             borderRadius: "4px",
             border: "1px solid #ccc",
-            width: "300px",
-            height: "80px",
-            fontFamily: "monospace",
-            resize: "vertical",
           }}
-          placeholder="Enter Nix expression..."
-        />
+        >
+          <option value="derivation">Derivation Graph</option>
+          <option value="reference">Reference Graph</option>
+        </select>
+
+        {graphType === "derivation" ? (
+          <textarea
+            value={nixExpression}
+            onChange={(e) => setNixExpression(e.target.value)}
+            placeholder="Enter Nix expression..."
+            style={{
+              width: "300px",
+              height: "80px",
+              fontFamily: "monospace",
+              resize: "vertical",
+              padding: "8px",
+              border: "1px solid #ccc",
+              borderRadius: "4px",
+            }}
+          />
+        ) : (
+          <input
+            type="text"
+            value={storePath}
+            onChange={(e) => setStorePath(e.target.value)}
+            placeholder="Enter store path..."
+            style={{
+              width: "300px",
+              padding: "8px",
+              fontFamily: "monospace",
+              border: "1px solid #ccc",
+              borderRadius: "4px",
+            }}
+          />
+        )}
+
         <button
-          onClick={loadGraph}
+          onClick={fetchGraph}
           disabled={isLoading}
           style={{
-            padding: "8px 16px",
+            padding: "10px 16px",
             backgroundColor: "#4CAF50",
             color: "white",
             border: "none",
             borderRadius: "4px",
             cursor: isLoading ? "not-allowed" : "pointer",
-            opacity: isLoading ? 0.7 : 1,
           }}
         >
           {isLoading ? "Loading..." : "Generate Graph"}
         </button>
         <button
           onClick={() => {
-            setFocusedNode(null);
-            setSearchTerm("");
+            if (fullData) {
+              setVisibleData(fullData);
+            }
           }}
           style={{
-            padding: "8px 16px",
+            padding: "10px 16px",
             backgroundColor: "#2196F3",
             color: "white",
             border: "none",
@@ -364,103 +329,109 @@ in
           Reset View
         </button>
       </div>
-      {isLoading && (
-        <div
-          style={{
-            position: "absolute",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            backgroundColor: "white",
-            padding: "20px 40px",
-            borderRadius: "8px",
-            boxShadow: "0 4px 12px rgba(0,0,0,0.15)",
-            display: "flex",
-            flexDirection: "column",
-            alignItems: "center",
-            gap: "15px",
-            zIndex: 1000,
-          }}
-        >
-          <div className="loader-dots">
-            <div></div>
-            <div></div>
-            <div></div>
-          </div>
-          <div
-            style={{
-              color: "#333",
-              fontWeight: 500,
-            }}
-          >
-            Generating Dependency Graph...
-          </div>
-          <div
-            style={{
-              fontSize: "14px",
-              color: "#666",
-              textAlign: "center",
-            }}
-          >
-            This may take a few seconds
-          </div>
-        </div>
-      )}
-      <div style={{ flex: 1, overflow: "hidden" }}>
+      <div
+        style={{
+          flex: 1,
+          position: "relative",
+          overflow: "hidden",
+        }}
+      >
         <svg ref={svgRef} style={{ width: "100%", height: "100%" }} />
+        {isLoading && (
+          <div
+            style={{
+              position: "absolute",
+              top: "50%",
+              left: "50%",
+              transform: "translate(-50%, -50%)",
+              padding: "20px",
+              background: "rgba(255, 255, 255, 0.9)",
+              borderRadius: "8px",
+              boxShadow: "0 2px 10px rgba(0, 0, 0, 0.1)",
+              zIndex: 1000,
+              display: "flex",
+              flexDirection: "column",
+              alignItems: "center",
+              justifyContent: "center",
+            }}
+          >
+            <div style={{ textAlign: "center" }}>
+              <div className="loader-dots" style={{ justifyContent: "center" }}>
+                <div></div>
+                <div></div>
+                <div></div>
+              </div>
+              <div style={{ marginTop: "10px" }}>
+                <div style={{ fontWeight: "bold" }}>
+                  Generating Dependency Graph...
+                </div>
+                <div
+                  style={{ fontSize: "14px", color: "#666", marginTop: "5px" }}
+                >
+                  This may take a few seconds
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
       <div
         style={{
           padding: "10px",
-          backgroundColor: "white",
-          borderTop: "1px solid #ccc",
           display: "flex",
-          gap: "20px",
           justifyContent: "center",
+          gap: "20px",
+          background: "#fff",
+          borderTop: "1px solid #ccc",
+          position: "sticky",
+          bottom: 0,
+          zIndex: 10,
+          minHeight: "40px",
+          boxSizing: "border-box",
         }}
       >
         <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-          <span
+          <div
             style={{
-              width: "12px",
-              height: "12px",
+              width: 12,
+              height: 12,
               backgroundColor: "#4CAF50",
               borderRadius: "50%",
             }}
-          ></span>
+          ></div>
           <span>Derivation (.drv)</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-          <span
+          <div
             style={{
-              width: "12px",
-              height: "12px",
+              width: 12,
+              height: 12,
               backgroundColor: "#FFA726",
               borderRadius: "50%",
             }}
-          ></span>
+          ></div>
           <span>Patch (.patch)</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-          <span
+          <div
             style={{
-              width: "12px",
-              height: "12px",
+              width: 12,
+              height: 12,
               backgroundColor: "#9C27B0",
               borderRadius: "50%",
             }}
-          ></span>
-          <span>Shell Script (.sh)</span>
+          ></div>
+          <span>Shell (.sh)</span>
         </div>
         <div style={{ display: "flex", alignItems: "center", gap: "5px" }}>
-          <span
+          <div
             style={{
-              width: "12px",
-              height: "12px",
+              width: 12,
+              height: 12,
               backgroundColor: "#2196F3",
               borderRadius: "50%",
             }}
-          ></span>
+          ></div>
           <span>Other</span>
         </div>
       </div>
